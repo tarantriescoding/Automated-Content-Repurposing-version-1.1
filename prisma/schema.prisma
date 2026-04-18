@@ -1,0 +1,46 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Video {
+  id          String   @id @default(cuid())
+  filename    String
+  originalUrl String
+  duration    Float    @default(0)
+  fileSize    Int      @default(0)
+  status      String   @default("uploaded") // uploaded, transcribing, analyzing, ready, error
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  clips       Clip[]
+  transcript  Transcript?
+}
+
+model Transcript {
+  id       String @id @default(cuid())
+  videoId  String @unique
+  fullText String @default("")
+  segments String @default("[]") // JSON array of {text, start, end}
+  video    Video  @relation(fields: [videoId], references: [id], onDelete: Cascade)
+}
+
+model Clip {
+  id             String   @id @default(cuid())
+  videoId        String
+  title          String   @default("")
+  hook           String   @default("")
+  startTime      Float    @default(0)
+  endTime        Float    @default(0)
+  sentimentScore Float    @default(0) // 0-1, higher = more emotional
+  emotion        String   @default("") // e.g., "inspiring", "passionate", "humorous"
+  captions       String   @default("[]") // JSON array of {text, start, end}
+  captionStyle   String   @default("karaoke") // karaoke, bold, minimal
+  thumbnailUrl   String   @default("")
+  status         String   @default("pending") // pending, generating, ready, error
+  createdAt      DateTime @default(now())
+  video          Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)
+}
