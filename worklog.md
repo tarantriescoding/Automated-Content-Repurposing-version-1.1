@@ -1,26 +1,26 @@
 ---
-Task ID: 1
+Task ID: 1-8
 Agent: Main
-Task: Fix AttentionX processing pipeline - ASR format incompatibility and 30-second limit
+Task: Fix AttentionX to fully solve the problem statement - make clips viewable and downloadable
 
 Work Log:
-- Investigated processing errors by reading dev.log → Found root cause: ASR API returns "Audio format conversion failed: unsupported audio format: unknown, only WAV and WebM are supported"
-- The original code was sending raw MP4 video file to ASR, but ASR only accepts WAV/WebM audio
-- Also discovered ASR has a 30-second duration limit ("transcriptions文件时长限制为0-30秒")
-- Fixed processing pipeline with multiple improvements:
-  1. Added ffmpeg-based audio extraction (MP4 → WAV, 16kHz mono)
-  2. Implemented chunked ASR: splits audio into 25-second chunks for videos > 30s
-  3. Added VLM fallback: if ASR fails, uses Vision Language Model with video_url to analyze video content
-  4. Added ffprobe for accurate video duration detection
-  5. Fixed clip time validation (ensure start < end, within video duration)
-  6. Fixed JSON parsing resilience in video details API
-- Added "Quick Start with Sample Video" button to upload zone
-- Added resume feature: page loads existing processed videos on refresh
-- Cleaned up old error videos from database
+- Updated Prisma schema to add `clipUrl` and `srtUrl` fields to Clip model
+- Ran `bun run db:push` to migrate the database
+- Updated TypeScript types (ClipData interface) with new fields
+- Rewrote processing pipeline (process/route.ts) to add Stage 5: Video Clip Extraction & SRT Generation using ffmpeg
+- Created `/api/clips/[id]/export` API endpoint for streaming MP4 downloads and SRT caption file downloads
+- Created `/api/clips/[id]/extract` API endpoint for on-demand clip extraction for existing clips
+- Built `ClipVideoPlayer` component with native HTML5 video player, dynamic caption overlay synced to video time, 3 caption styles (karaoke/bold/minimal), play/pause/mute controls, progress bar, and timestamp display
+- Rewrote `ClipDetail` modal to use the new video player with real download functionality (MP4 + SRT)
+- Updated `ClipCard` to show video preview on hover, timestamp highlight badge, and "Video Ready" indicator
+- Updated `ClipResults` with auto-extraction for existing clips, "Download All" button, and progress indicator
+- Updated data mapping in page.tsx and processing-pipeline.tsx to include clipUrl and srtUrl
+- Fixed export endpoint to use streaming instead of reading entire file into memory
+- Ran lint checks and fixed all errors
+- Tested full pipeline end-to-end: upload → transcription → analysis → caption generation → clip extraction → video playback → download
 
 Stage Summary:
-- Root cause: MP4 format incompatible with ASR (only WAV/WebM supported) AND 30-second ASR limit
-- Solution: ffmpeg audio extraction + chunked ASR + VLM fallback
-- Processing pipeline now works end-to-end: upload → extract audio → chunked ASR → LLM analysis → caption generation → thumbnail generation
-- Successfully processed video.mp4 (85s) into 4 viral clips with thumbnails
-- Key files modified: src/app/api/videos/[id]/process/route.ts, src/app/api/videos/[id]/route.ts, src/components/upload-zone.tsx, src/app/page.tsx
+- The app now fully solves the problem statement: long-form videos are transformed into viewable, downloadable timestamp-based highlight clips
+- Key new features: Video clip extraction (ffmpeg), SRT caption file generation, Video player with synced captions, MP4/SRT download, Auto-extraction for existing clips
+- All API endpoints working: /export (MP4+SRT), /extract (on-demand)
+- Build and lint pass cleanly

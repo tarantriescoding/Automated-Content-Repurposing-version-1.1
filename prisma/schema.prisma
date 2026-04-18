@@ -40,6 +40,8 @@ model Clip {
   captions       String   @default("[]") // JSON array of {text, start, end}
   captionStyle   String   @default("karaoke") // karaoke, bold, minimal
   thumbnailUrl   String   @default("")
+  clipUrl        String   @default("") // path to extracted clip video file
+  srtUrl         String   @default("") // path to SRT caption file
   status         String   @default("pending") // pending, generating, ready, error
   createdAt      DateTime @default(now())
   video          Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)

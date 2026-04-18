@@ -71,6 +71,8 @@ export default function AttentionXPage() {
                   | "bold"
                   | "minimal",
                 thumbnailUrl: (clip.thumbnailUrl as string) || "",
+                clipUrl: (clip.clipUrl as string) || "",
+                srtUrl: (clip.srtUrl as string) || "",
                 status: (clip.status as string) || "ready",
                 createdAt: (clip.createdAt as string) || new Date().toISOString(),
               })

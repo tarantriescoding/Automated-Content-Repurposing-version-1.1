@@ -253,6 +253,47 @@ async function transcribeWithChunking(
   };
 }
 
+/**
+ * Generate SRT content from captions array.
+ * Captions have absolute times; we convert to clip-relative times
+ * by subtracting clipStartTime.
+ */
+function generateSrt(
+  captions: Array<{ text: string; start: number; end: number }>,
+  clipStartTime: number
+): string {
+  const lines: string[] = [];
+
+  for (let i = 0; i < captions.length; i++) {
+    const caption = captions[i];
+    // Convert absolute times to clip-relative times
+    const relativeStart = Math.max(0, caption.start - clipStartTime);
+    const relativeEnd = Math.max(0, caption.end - clipStartTime);
+
+    lines.push(String(i + 1));
+    lines.push(`${formatSrtTime(relativeStart)} --> ${formatSrtTime(relativeEnd)}`);
+    lines.push(caption.text);
+    lines.push(""); // blank line separator
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Format seconds into SRT time format: HH:MM:SS,mmm
+ */
+function formatSrtTime(seconds: number): string {
+  const totalMs = Math.round(seconds * 1000);
+  const ms = totalMs % 1000;
+  const totalSeconds = Math.floor(totalMs / 1000);
+  const s = totalSeconds % 60;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const m = totalMinutes % 60;
+  const h = Math.floor(totalMinutes / 60);
+
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")},${String(ms).padStart(3, "0")}`;
+}
+
 function resolveVideoPath(originalUrl: string): string | null {
   // 1. Files in public/uploads/ (web uploads like /uploads/xxx.mp4)
   if (originalUrl.startsWith("/")) {
@@ -671,6 +712,122 @@ Respond with ONLY valid JSON:
       } catch (thumbError) {
         console.error(`[Process] Thumbnail generation failed for clip ${clip.id}:`, thumbError);
         // Thumbnail failure is non-critical; continue processing
+      }
+    }
+
+    // ── Stage 5: Video Clip Extraction & SRT Generation ──────────
+    console.log(`[Process] Stage 5: Extracting video clips and generating SRT files`);
+
+    // Ensure upload directory exists
+    if (!fs.existsSync(UPLOAD_DIR)) {
+      fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+    }
+
+    for (const clip of createdClips) {
+      try {
+        const clipRecord = await db.clip.findUnique({ where: { id: clip.id } });
+        if (!clipRecord || clipRecord.status === "error") {
+          console.log(`[Process] Skipping clip ${clip.id} (status: ${clipRecord?.status || "missing"})`);
+          continue;
+        }
+
+        const clipStart = clipRecord.startTime;
+        const clipEnd = clipRecord.endTime;
+        const clipDuration = clipEnd - clipStart;
+
+        if (clipDuration <= 0) {
+          console.error(`[Process] Invalid clip duration for ${clip.id}: ${clipDuration}s`);
+          continue;
+        }
+
+        // ── Extract clip video with ffmpeg (fast seek) ────────────────
+        const clipFilename = `clip_${clip.id}_${Date.now()}.mp4`;
+        const clipPath = path.join(UPLOAD_DIR, clipFilename);
+
+        console.log(`[Process] Extracting clip "${clipRecord.title}" (${clipStart.toFixed(1)}s - ${clipEnd.toFixed(1)}s, ${clipDuration.toFixed(1)}s)`);
+
+        try {
+          // Use fast seek: -ss before -i for speed, -t for duration
+          await execFileAsync("ffmpeg", [
+            "-ss", clipStart.toString(),
+            "-i", videoPath,
+            "-t", clipDuration.toString(),
+            "-c:v", "libx264",
+            "-c:a", "aac",
+            "-y",
+            clipPath,
+          ]);
+
+          if (fs.existsSync(clipPath)) {
+            const clipUrl = `/uploads/${clipFilename}`;
+            await db.clip.update({
+              where: { id: clip.id },
+              data: { clipUrl },
+            });
+            console.log(`[Process] Clip video saved: ${clipFilename}`);
+          } else {
+            console.error(`[Process] Clip video file not created: ${clipFilename}`);
+          }
+        } catch (ffmpegError) {
+          console.error(`[Process] ffmpeg clip extraction failed for ${clip.id}:`, ffmpegError);
+          // Try fallback with -ss after -i (slower but more accurate)
+          try {
+            console.log(`[Process] Retrying clip extraction with accurate seek for ${clip.id}`);
+            await execFileAsync("ffmpeg", [
+              "-i", videoPath,
+              "-ss", clipStart.toString(),
+              "-to", clipEnd.toString(),
+              "-c:v", "libx264",
+              "-c:a", "aac",
+              "-y",
+              clipPath,
+            ]);
+
+            if (fs.existsSync(clipPath)) {
+              const clipUrl = `/uploads/${clipFilename}`;
+              await db.clip.update({
+                where: { id: clip.id },
+                data: { clipUrl },
+              });
+              console.log(`[Process] Clip video saved (fallback): ${clipFilename}`);
+            }
+          } catch (fallbackError) {
+            console.error(`[Process] Fallback clip extraction also failed for ${clip.id}:`, fallbackError);
+          }
+        }
+
+        // ── Generate SRT caption file ────────────────────────────────
+        try {
+          const captionsRaw = clipRecord.captions || "[]";
+          let captions: Array<{ text: string; start: number; end: number }> = [];
+          try {
+            captions = JSON.parse(captionsRaw);
+          } catch {
+            captions = [];
+          }
+
+          if (captions.length > 0) {
+            const srtContent = generateSrt(captions, clipStart);
+            const srtFilename = `clip_${clip.id}_${Date.now()}.srt`;
+            const srtPath = path.join(UPLOAD_DIR, srtFilename);
+            fs.writeFileSync(srtPath, srtContent, "utf-8");
+
+            const srtUrl = `/uploads/${srtFilename}`;
+            await db.clip.update({
+              where: { id: clip.id },
+              data: { srtUrl },
+            });
+            console.log(`[Process] SRT file saved: ${srtFilename} (${captions.length} captions)`);
+          } else {
+            console.log(`[Process] No captions for clip ${clip.id}, skipping SRT generation`);
+          }
+        } catch (srtError) {
+          console.error(`[Process] SRT generation failed for clip ${clip.id}:`, srtError);
+          // SRT failure is non-critical; continue processing
+        }
+      } catch (clipExtractionError) {
+        console.error(`[Process] Clip extraction pipeline failed for clip ${clip.id}:`, clipExtractionError);
+        // Continue with other clips — one failure should not block the rest
       }
     }
 

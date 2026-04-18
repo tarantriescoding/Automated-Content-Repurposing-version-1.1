@@ -99,6 +99,8 @@ const stageLogMessages: Record<string, string[]> = {
     "Selecting optimal clip boundaries...",
     "Generating dynamic karaoke-style captions...",
     "Creating catchy hook headlines...",
+    "Extracting video clips with ffmpeg...",
+    "Generating SRT caption files...",
     "Rendering viral clips...",
   ],
   complete: ["Processing pipeline complete!"],
@@ -190,6 +192,8 @@ export function ProcessingPipeline() {
               | "bold"
               | "minimal",
             thumbnailUrl: (clip.thumbnailUrl as string) || "",
+            clipUrl: (clip.clipUrl as string) || "",
+            srtUrl: (clip.srtUrl as string) || "",
             status: (clip.status as string) || "ready",
             createdAt: (clip.createdAt as string) || new Date().toISOString(),
           })

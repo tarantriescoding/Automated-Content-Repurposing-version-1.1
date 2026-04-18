@@ -11,13 +11,16 @@ import {
   Minimize2,
   RefreshCw,
   Loader2,
+  FileText,
+  Clock,
+  Video,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { PhonePreview } from "./phone-preview";
+import { ClipVideoPlayer } from "./clip-video-player";
 import { useAppStore } from "@/lib/store";
 import type { ClipData } from "@/lib/types";
 
@@ -70,6 +73,11 @@ const emotionConfig: Record<
     color: "text-red-500",
     bg: "bg-red-600/20 border-red-600/30",
   },
+  neutral: {
+    emoji: "💬",
+    color: "text-zinc-400",
+    bg: "bg-zinc-500/20 border-zinc-500/30",
+  },
 };
 
 const captionStyles: {
@@ -101,9 +109,11 @@ interface ClipDetailProps {
 
 export function ClipDetail({ clip }: ClipDetailProps) {
   const { setSelectedClip, clips } = useAppStore();
-  const emotion = emotionConfig[clip.emotion] || emotionConfig.Inspiring;
+  const emotion = emotionConfig[clip.emotion] || emotionConfig.neutral;
   const [isGeneratingThumb, setIsGeneratingThumb] = useState(false);
   const [thumbUrl, setThumbUrl] = useState(clip.thumbnailUrl);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadFormat, setDownloadFormat] = useState<"mp4" | "srt" | null>(null);
 
   const clipDuration = clip.endTime - clip.startTime;
 
@@ -126,7 +136,6 @@ export function ClipDetail({ clip }: ClipDetailProps) {
       if (res.ok) {
         const data = await res.json();
         setThumbUrl(data.thumbnailUrl);
-        // Update clip in store
         const updatedClips = clips.map((c) =>
           c.id === clip.id
             ? { ...c, thumbnailUrl: data.thumbnailUrl }
@@ -141,6 +150,38 @@ export function ClipDetail({ clip }: ClipDetailProps) {
       console.error("Failed to regenerate thumbnail:", err);
     } finally {
       setIsGeneratingThumb(false);
+    }
+  };
+
+  const handleDownload = async (format: "mp4" | "srt") => {
+    setIsDownloading(true);
+    setDownloadFormat(format);
+    try {
+      const url =
+        format === "srt"
+          ? `/api/clips/${clip.id}/export?format=srt`
+          : `/api/clips/${clip.id}/export`;
+
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("Download failed");
+
+      const blob = await res.blob();
+      const downloadUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = downloadUrl;
+      a.download =
+        format === "srt"
+          ? `${clip.title.replace(/[^a-zA-Z0-9]/g, "_")}.srt`
+          : `${clip.title.replace(/[^a-zA-Z0-9]/g, "_")}.mp4`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(downloadUrl);
+    } catch (err) {
+      console.error("Download error:", err);
+    } finally {
+      setIsDownloading(false);
+      setDownloadFormat(null);
     }
   };
 
@@ -171,12 +212,22 @@ export function ClipDetail({ clip }: ClipDetailProps) {
                 >
                   {emotion.emoji} {clip.emotion}
                 </Badge>
-                <span className="text-zinc-400 text-sm">
+                <span className="text-zinc-400 text-sm flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5" />
                   {formatTime(clip.startTime)} - {formatTime(clip.endTime)}{" "}
                   <span className="text-zinc-600">
                     ({formatDuration(clipDuration)})
                   </span>
                 </span>
+                {clip.clipUrl && (
+                  <Badge
+                    variant="outline"
+                    className="bg-emerald-500/20 border-emerald-500/30 text-emerald-400 text-xs"
+                  >
+                    <Video className="w-3 h-3 mr-1" />
+                    Video Ready
+                  </Badge>
+                )}
               </div>
               <button
                 onClick={() => setSelectedClip(null)}
@@ -189,11 +240,9 @@ export function ClipDetail({ clip }: ClipDetailProps) {
 
             {/* Content */}
             <div className="flex flex-col md:flex-row max-h-[calc(90vh-64px)]">
-              {/* Left: Phone Preview */}
-              <div className="flex-shrink-0 p-6 flex items-center justify-center border-b md:border-b-0 md:border-r border-zinc-800">
-                <PhonePreview
-                  clip={{ ...clip, thumbnailUrl: thumbUrl || clip.thumbnailUrl }}
-                />
+              {/* Left: Video Player */}
+              <div className="flex-shrink-0 p-6 flex items-center justify-center border-b md:border-b-0 md:border-r border-zinc-800 bg-zinc-950/50">
+                <ClipVideoPlayer clip={{ ...clip, thumbnailUrl: thumbUrl || clip.thumbnailUrl }} />
               </div>
 
               {/* Right: Controls & Transcript */}
@@ -216,7 +265,7 @@ export function ClipDetail({ clip }: ClipDetailProps) {
                         Hook / Headline
                       </label>
                       <div className="bg-zinc-800/50 border border-zinc-700 rounded-lg p-3">
-                        <p className="text-white font-semibold">
+                        <p className="text-orange-400 font-semibold text-lg">
                           &ldquo;{clip.hook}&rdquo;
                         </p>
                       </div>
@@ -309,41 +358,80 @@ export function ClipDetail({ clip }: ClipDetailProps) {
 
                     <Separator className="bg-zinc-800" />
 
-                    {/* Transcript */}
+                    {/* Transcript / Timestamp Captions */}
                     <div>
                       <label className="text-zinc-500 text-xs font-medium uppercase tracking-wider mb-3 block">
-                        Transcript
+                        Timestamp Captions
                       </label>
-                      <div className="bg-zinc-800/50 border border-zinc-700 rounded-lg p-4 space-y-2">
-                        {clip.captions.map((cap, idx) => (
+                      <div className="bg-zinc-800/50 border border-zinc-700 rounded-lg p-4 space-y-2 max-h-48 overflow-y-auto">
+                        {clip.captions.length > 0 ? clip.captions.map((cap, idx) => (
                           <div
                             key={idx}
-                            className="flex items-start gap-2"
+                            className="flex items-start gap-3"
                           >
-                            <span className="text-zinc-600 text-xs font-mono flex-shrink-0 mt-0.5">
+                            <span className="text-orange-400/70 text-xs font-mono flex-shrink-0 mt-0.5 bg-orange-500/10 px-1.5 py-0.5 rounded">
                               {formatTime(cap.start)}
                             </span>
                             <p className="text-zinc-300 text-sm">
                               {cap.text}
                             </p>
                           </div>
-                        ))}
+                        )) : (
+                          <p className="text-zinc-500 text-sm">No captions generated for this clip.</p>
+                        )}
                       </div>
                     </div>
 
-                    {/* Action buttons */}
-                    <div className="flex gap-3">
-                      <Button className="flex-1 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-semibold">
-                        <Download className="w-4 h-4 mr-2" />
-                        Download Clip
-                      </Button>
-                      <Button
-                        variant="outline"
-                        className="border-zinc-700 text-zinc-300 hover:bg-zinc-800"
-                      >
-                        <Share2 className="w-4 h-4 mr-2" />
-                        Share
-                      </Button>
+                    <Separator className="bg-zinc-800" />
+
+                    {/* Download buttons */}
+                    <div>
+                      <label className="text-zinc-500 text-xs font-medium uppercase tracking-wider mb-3 block">
+                        Download
+                      </label>
+                      <div className="flex gap-3">
+                        <Button
+                          className="flex-1 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-semibold"
+                          onClick={() => handleDownload("mp4")}
+                          disabled={isDownloading}
+                        >
+                          {isDownloading && downloadFormat === "mp4" ? (
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          ) : (
+                            <Download className="w-4 h-4 mr-2" />
+                          )}
+                          Download MP4
+                        </Button>
+                        <Button
+                          variant="outline"
+                          className="border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+                          onClick={() => handleDownload("srt")}
+                          disabled={isDownloading}
+                        >
+                          {isDownloading && downloadFormat === "srt" ? (
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          ) : (
+                            <FileText className="w-4 h-4 mr-2" />
+                          )}
+                          SRT
+                        </Button>
+                        <Button
+                          variant="outline"
+                          className="border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+                          onClick={() => {
+                            if (navigator.clipboard) {
+                              const text = clip.captions.map((c, i) => `${formatTime(c.start)}: ${c.text}`).join("\n");
+                              navigator.clipboard.writeText(text);
+                            }
+                          }}
+                        >
+                          <Share2 className="w-4 h-4 mr-2" />
+                          Copy
+                        </Button>
+                      </div>
+                      <p className="text-zinc-600 text-xs mt-2">
+                        MP4 includes the clip video. SRT is a caption file you can import into any video editor.
+                      </p>
                     </div>
                   </div>
                 </ScrollArea>

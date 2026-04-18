@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import {
   PartyPopper,
@@ -7,6 +8,9 @@ import {
   Eye,
   BarChart3,
   ArrowLeft,
+  Video,
+  Loader2,
+  Download,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -43,7 +47,75 @@ function ConfettiParticle({ delay, x }: { delay: number; x: number }) {
 }
 
 export function ClipResults() {
-  const { clips, selectedClip, setSelectedClip, reset } = useAppStore();
+  const { clips, setClips, selectedClip, setSelectedClip, reset, currentVideo } = useAppStore();
+  const [isExtracting, setIsExtracting] = useState(false);
+  const [extractProgress, setExtractProgress] = useState("");
+
+  // Count clips that need video extraction
+  const clipsWithoutVideo = clips.filter((c) => !c.clipUrl);
+  const clipsWithVideo = clips.filter((c) => c.clipUrl);
+
+  const extractMissingVideos = async () => {
+    if (clipsWithoutVideo.length === 0 || isExtracting) return;
+
+    setIsExtracting(true);
+    const updatedClips = [...clips];
+
+    for (let i = 0; i < clipsWithoutVideo.length; i++) {
+      const clip = clipsWithoutVideo[i];
+      setExtractProgress(`Extracting video ${i + 1}/${clipsWithoutVideo.length}...`);
+
+      try {
+        const res = await fetch(`/api/clips/${clip.id}/extract`, {
+          method: "POST",
+        });
+        if (res.ok) {
+          const data = await res.json();
+          // Update the clip in our local state
+          const idx = updatedClips.findIndex((c) => c.id === clip.id);
+          if (idx !== -1) {
+            updatedClips[idx] = {
+              ...updatedClips[idx],
+              clipUrl: data.clipUrl || "",
+              srtUrl: data.srtUrl || "",
+            };
+          }
+        }
+      } catch (err) {
+        console.error(`Failed to extract clip ${clip.id}:`, err);
+      }
+    }
+
+    setClips(updatedClips);
+    setIsExtracting(false);
+    setExtractProgress("");
+  };
+
+  // Auto-extract is now triggered manually via button
+  // to avoid server OOM from processing all clips at once
+
+  const handleDownloadAll = async () => {
+    for (const clip of clipsWithVideo) {
+      try {
+        const res = await fetch(`/api/clips/${clip.id}/export`);
+        if (res.ok) {
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `${clip.title.replace(/[^a-zA-Z0-9]/g, "_")}.mp4`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+          // Small delay between downloads
+          await new Promise((r) => setTimeout(r, 500));
+        }
+      } catch (err) {
+        console.error("Download failed for clip", clip.id, err);
+      }
+    }
+  };
 
   const avgSentiment =
     clips.length > 0
@@ -80,12 +152,12 @@ export function ClipResults() {
         <div className="inline-flex items-center gap-2 mb-4">
           <PartyPopper className="w-8 h-8 text-orange-400" />
           <h2 className="text-3xl sm:text-4xl font-bold text-white">
-            Your Viral Clips Are Ready!
+            Timestamp-Based Highlights
           </h2>
           <PartyPopper className="w-8 h-8 text-amber-400" />
         </div>
         <p className="text-zinc-400 text-lg">
-          {clips.length} clips generated from your video
+          {clips.length} golden nuggets extracted from your video
         </p>
       </motion.div>
 
@@ -94,7 +166,7 @@ export function ClipResults() {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.1 }}
-        className="grid grid-cols-3 gap-3 sm:gap-4 mb-8"
+        className="grid grid-cols-3 gap-3 sm:gap-4 mb-6"
       >
         <Card className="bg-zinc-900/80 border-zinc-800 backdrop-blur-sm">
           <CardContent className="p-4 text-center">
@@ -141,8 +213,66 @@ export function ClipResults() {
         </Card>
       </motion.div>
 
+      {/* Video extraction status / actions */}
+      {isExtracting && (
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-6 flex items-center justify-center gap-3 bg-orange-500/10 border border-orange-500/20 rounded-lg px-4 py-3"
+        >
+          <Loader2 className="w-4 h-4 text-orange-400 animate-spin" />
+          <span className="text-orange-300 text-sm">{extractProgress}</span>
+        </motion.div>
+      )}
+
+      {!isExtracting && clipsWithoutVideo.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-6 flex items-center justify-between bg-amber-500/10 border border-amber-500/20 rounded-lg px-4 py-3"
+        >
+          <div className="flex items-center gap-2">
+            <Video className="w-4 h-4 text-amber-400" />
+            <span className="text-amber-300 text-sm">
+              {clipsWithoutVideo.length} clips need video extraction
+            </span>
+          </div>
+          <Button
+            size="sm"
+            className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white text-xs"
+            onClick={extractMissingVideos}
+          >
+            <Video className="w-3 h-3 mr-1" />
+            Extract Videos
+          </Button>
+        </motion.div>
+      )}
+
+      {!isExtracting && clipsWithVideo.length > 0 && clipsWithoutVideo.length === 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-6 flex items-center justify-between bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-4 py-3"
+        >
+          <div className="flex items-center gap-2">
+            <Video className="w-4 h-4 text-emerald-400" />
+            <span className="text-emerald-300 text-sm">
+              {clipsWithVideo.length}/{clips.length} clips have video ready to view & download
+            </span>
+          </div>
+          <Button
+            size="sm"
+            className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white text-xs"
+            onClick={handleDownloadAll}
+          >
+            <Download className="w-3 h-3 mr-1" />
+            Download All
+          </Button>
+        </motion.div>
+      )}
+
       {/* Clip Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4 mb-8">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 mb-8">
         {clips.map((clip, idx) => (
           <ClipCard
             key={clip.id}

@@ -34,6 +34,8 @@ export interface ClipData {
   captions: CaptionData[];
   captionStyle: "karaoke" | "bold" | "minimal";
   thumbnailUrl: string;
+  clipUrl: string;
+  srtUrl: string;
   status: string;
   createdAt: string;
 }

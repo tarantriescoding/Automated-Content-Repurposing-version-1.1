@@ -1,7 +1,8 @@
 "use client";
 
+import { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Clock, TrendingUp } from "lucide-react";
+import { Clock, TrendingUp, Play, Video } from "lucide-react";
 import Image from "next/image";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -56,6 +57,11 @@ const emotionConfig: Record<
     color: "text-red-500",
     bg: "bg-red-600/20 border-red-600/30",
   },
+  neutral: {
+    emoji: "💬",
+    color: "text-zinc-400",
+    bg: "bg-zinc-500/20 border-zinc-500/30",
+  },
 };
 
 function formatTime(seconds: number): string {
@@ -73,6 +79,25 @@ interface ClipCardProps {
 export function ClipCard({ clip, index, onSelect }: ClipCardProps) {
   const emotion = emotionConfig[clip.emotion] || emotionConfig.Inspiring;
   const hasThumbnail = clip.thumbnailUrl && clip.thumbnailUrl.length > 0;
+  const hasVideo = clip.clipUrl && clip.clipUrl.length > 0;
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [isHovering, setIsHovering] = useState(false);
+  const [videoLoaded, setVideoLoaded] = useState(false);
+
+  // Auto-play on hover for video clips
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !hasVideo) return;
+
+    if (isHovering) {
+      video.currentTime = 0;
+      video.play().catch(() => {});
+    } else {
+      video.pause();
+    }
+  }, [isHovering, hasVideo]);
+
+  const clipDuration = clip.endTime - clip.startTime;
 
   return (
     <motion.div
@@ -82,22 +107,44 @@ export function ClipCard({ clip, index, onSelect }: ClipCardProps) {
       whileHover={{ scale: 1.02 }}
       whileTap={{ scale: 0.98 }}
       onClick={() => onSelect(clip)}
+      onMouseEnter={() => setIsHovering(true)}
+      onMouseLeave={() => setIsHovering(false)}
       className="cursor-pointer"
     >
       <Card className="bg-zinc-900/80 border-zinc-800 backdrop-blur-sm hover:border-orange-500/30 transition-all duration-300 overflow-hidden">
         <CardContent className="p-0">
           {/* Vertical preview area (9:16 aspect) */}
           <div className="relative aspect-[9/16] bg-gradient-to-br from-zinc-800 via-zinc-900 to-zinc-800 overflow-hidden">
+            {/* Video preview on hover */}
+            {hasVideo && (
+              <video
+                ref={videoRef}
+                src={clip.clipUrl}
+                className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 ${
+                  isHovering && videoLoaded ? "opacity-100" : "opacity-0"
+                }`}
+                muted
+                playsInline
+                loop
+                preload="none"
+                onLoadedData={() => setVideoLoaded(true)}
+              />
+            )}
+
             {/* Thumbnail image if available */}
-            {hasThumbnail ? (
+            {hasThumbnail && (
               <Image
                 src={clip.thumbnailUrl}
                 alt={clip.title}
                 fill
-                className="object-cover"
+                className={`object-cover transition-opacity duration-300 ${
+                  isHovering && hasVideo && videoLoaded ? "opacity-0" : "opacity-100"
+                }`}
                 sizes="(max-width: 640px) 50vw, 20vw"
               />
-            ) : (
+            )}
+
+            {!hasThumbnail && (
               <>
                 {/* Gradient overlay for placeholder */}
                 <div className="absolute inset-0 bg-gradient-to-br from-orange-500/10 via-zinc-800 to-amber-500/10" />
@@ -116,6 +163,19 @@ export function ClipCard({ clip, index, onSelect }: ClipCardProps) {
             {/* Dark overlay for text readability */}
             <div className="absolute inset-0 bg-gradient-to-t from-zinc-900/90 via-transparent to-zinc-900/40" />
 
+            {/* Video ready badge */}
+            {hasVideo && (
+              <div className="absolute top-3 left-3">
+                <Badge
+                  variant="outline"
+                  className="bg-emerald-500/20 border-emerald-500/30 text-emerald-400 text-[10px] font-medium px-1.5 py-0"
+                >
+                  <Video className="w-2.5 h-2.5 mr-0.5" />
+                  Video
+                </Badge>
+              </div>
+            )}
+
             {/* Hook text overlay at top */}
             <div className="absolute top-3 left-3 right-3">
               <p className="text-white text-sm font-semibold leading-tight drop-shadow-lg line-clamp-2">
@@ -131,6 +191,23 @@ export function ClipCard({ clip, index, onSelect }: ClipCardProps) {
               >
                 {emotion.emoji} {clip.emotion}
               </Badge>
+            </div>
+
+            {/* Timestamp highlight badge */}
+            <div className="absolute bottom-14 left-3 right-3">
+              <div className="flex items-center justify-center gap-1.5 bg-black/50 backdrop-blur-sm rounded-lg px-2 py-1.5">
+                <Clock className="w-3 h-3 text-orange-400" />
+                <span className="text-white text-xs font-mono font-semibold">
+                  {formatTime(clip.startTime)}
+                </span>
+                <span className="text-zinc-500 text-xs">→</span>
+                <span className="text-white text-xs font-mono font-semibold">
+                  {formatTime(clip.endTime)}
+                </span>
+                <span className="text-orange-400/70 text-[10px] ml-1">
+                  ({formatTime(clipDuration)})
+                </span>
+              </div>
             </div>
 
             {/* Caption preview at bottom */}
@@ -152,13 +229,7 @@ export function ClipCard({ clip, index, onSelect }: ClipCardProps) {
             {/* Play button overlay */}
             <div className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity bg-black/30">
               <div className="w-12 h-12 rounded-full bg-orange-500/80 flex items-center justify-center">
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="currentColor"
-                  className="w-6 h-6 text-white ml-1"
-                >
-                  <path d="M8 5v14l11-7z" />
-                </svg>
+                <Play className="w-5 h-5 text-white ml-0.5" fill="currentColor" />
               </div>
             </div>
           </div>
