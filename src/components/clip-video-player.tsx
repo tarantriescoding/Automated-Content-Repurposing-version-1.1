@@ -28,12 +28,17 @@ function formatTimestamp(seconds: number): string {
   return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
 }
 
-/** Convert absolute caption times to clip-relative */
+/** Convert absolute caption times to clip-relative, or pass through if already relative */
 function toRelative(captions: CaptionData[], clipStart: number): CaptionData[] {
+  if (captions.length === 0) return captions;
+  // Detect if captions are already relative (first caption starts near 0)
+  const firstStart = captions[0].start;
+  const isAlreadyRelative = firstStart < 5;
+  if (isAlreadyRelative) return captions;
   return captions.map((c) => ({
     text: c.text,
-    start: c.start - clipStart,
-    end: c.end - clipStart,
+    start: Math.max(0, c.start - clipStart),
+    end: Math.max(0, c.end - clipStart),
   }));
 }
 

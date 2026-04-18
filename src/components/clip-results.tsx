@@ -97,20 +97,15 @@ export function ClipResults() {
   const handleDownloadAll = async () => {
     for (const clip of clipsWithVideo) {
       try {
-        const res = await fetch(`/api/clips/${clip.id}/export`);
-        if (res.ok) {
-          const blob = await res.blob();
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = url;
-          a.download = `${clip.title.replace(/[^a-zA-Z0-9]/g, "_")}.mp4`;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          URL.revokeObjectURL(url);
-          // Small delay between downloads
-          await new Promise((r) => setTimeout(r, 500));
-        }
+        // Direct download from static files
+        const a = document.createElement("a");
+        a.href = clip.clipUrl;
+        a.download = `${clip.title.replace(/[^a-zA-Z0-9]/g, "_")}.mp4`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        // Small delay between downloads
+        await new Promise((r) => setTimeout(r, 500));
       } catch (err) {
         console.error("Download failed for clip", clip.id, err);
       }

@@ -157,26 +157,43 @@ export function ClipDetail({ clip }: ClipDetailProps) {
     setIsDownloading(true);
     setDownloadFormat(format);
     try {
-      const url =
-        format === "srt"
-          ? `/api/clips/${clip.id}/export?format=srt`
-          : `/api/clips/${clip.id}/export`;
+      if (format === "mp4" && clip.clipUrl) {
+        // Direct download from static file - avoids API memory issues
+        const a = document.createElement("a");
+        a.href = clip.clipUrl;
+        a.download = `${clip.title.replace(/[^a-zA-Z0-9]/g, "_")}.mp4`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      } else if (format === "srt") {
+        const url = `/api/clips/${clip.id}/export?format=srt`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error("Download failed");
 
-      const res = await fetch(url);
-      if (!res.ok) throw new Error("Download failed");
-
-      const blob = await res.blob();
-      const downloadUrl = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = downloadUrl;
-      a.download =
-        format === "srt"
-          ? `${clip.title.replace(/[^a-zA-Z0-9]/g, "_")}.srt`
-          : `${clip.title.replace(/[^a-zA-Z0-9]/g, "_")}.mp4`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(downloadUrl);
+        const blob = await res.blob();
+        const downloadUrl = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = downloadUrl;
+        a.download = `${clip.title.replace(/[^a-zA-Z0-9]/g, "_")}.srt`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(downloadUrl);
+      } else {
+        // Fallback: use API for MP4 if no clipUrl
+        const url = `/api/clips/${clip.id}/export`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error("Download failed");
+        // Follow redirect if needed
+        if (res.redirected) {
+          const a = document.createElement("a");
+          a.href = res.url;
+          a.download = `${clip.title.replace(/[^a-zA-Z0-9]/g, "_")}.mp4`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+        }
+      }
     } catch (err) {
       console.error("Download error:", err);
     } finally {

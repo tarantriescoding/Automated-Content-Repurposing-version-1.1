@@ -1,14 +1,20 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState, Suspense, lazy } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Zap } from "lucide-react";
+import { Zap, Loader2 } from "lucide-react";
 import { useAppStore } from "@/lib/store";
 import { HeroSection } from "@/components/hero-section";
 import { UploadZone } from "@/components/upload-zone";
-import { ProcessingPipeline } from "@/components/processing-pipeline";
-import { ClipResults } from "@/components/clip-results";
 import type { ClipData } from "@/lib/types";
+
+// Lazy load heavy components that aren't needed on initial render
+const ProcessingPipeline = lazy(() =>
+  import("@/components/processing-pipeline").then((m) => ({ default: m.ProcessingPipeline }))
+);
+const ClipResults = lazy(() =>
+  import("@/components/clip-results").then((m) => ({ default: m.ClipResults }))
+);
 
 export default function AttentionXPage() {
   const {
@@ -19,24 +25,27 @@ export default function AttentionXPage() {
     setProcessingProgress,
     setClips,
   } = useAppStore();
+  const [isHydrated, setIsHydrated] = useState(false);
 
   // On mount, check if there are any existing videos to resume
+  // Use a short delay so the initial render is not blocked
   useEffect(() => {
-    async function checkExistingVideos() {
+    let cancelled = false;
+
+    const timer = setTimeout(async () => {
       try {
         const res = await fetch("/api/videos");
-        if (!res.ok) return;
+        if (!res.ok || cancelled) return;
 
         const { videos } = await res.json();
-        if (!videos || videos.length === 0) return;
+        if (!videos || videos.length === 0 || cancelled) return;
 
         // Find the most recent video
         const latestVideo = videos[0];
 
         if (latestVideo.status === "ready") {
-          // Load the completed video results
           const detailRes = await fetch(`/api/videos/${latestVideo.id}`);
-          if (!detailRes.ok) return;
+          if (!detailRes.ok || cancelled) return;
           const { video } = await detailRes.json();
 
           setCurrentVideo({
@@ -88,7 +97,6 @@ export default function AttentionXPage() {
           latestVideo.status === "analyzing" ||
           latestVideo.status === "generating"
         ) {
-          // Resume processing view
           setCurrentVideo({
             id: latestVideo.id,
             filename: latestVideo.filename,
@@ -119,10 +127,18 @@ export default function AttentionXPage() {
         }
       } catch {
         // Silently fail - user can always start fresh
+      } finally {
+        if (!cancelled) setIsHydrated(true);
       }
-    }
+    }, 100);
 
-    checkExistingVideos();
+    // Mark as hydrated immediately if no data fetch changes the view
+    setIsHydrated(true);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [setView, setCurrentVideo, setProcessingStage, setProcessingProgress, setClips]);
 
   return (
@@ -178,7 +194,15 @@ export default function AttentionXPage() {
               transition={{ duration: 0.4 }}
               className="pt-8"
             >
-              <ProcessingPipeline />
+              <Suspense
+                fallback={
+                  <div className="flex items-center justify-center py-20">
+                    <Loader2 className="w-8 h-8 text-orange-400 animate-spin" />
+                  </div>
+                }
+              >
+                <ProcessingPipeline />
+              </Suspense>
             </motion.div>
           )}
 
@@ -191,7 +215,15 @@ export default function AttentionXPage() {
               transition={{ duration: 0.4 }}
               className="pt-8"
             >
-              <ClipResults />
+              <Suspense
+                fallback={
+                  <div className="flex items-center justify-center py-20">
+                    <Loader2 className="w-8 h-8 text-orange-400 animate-spin" />
+                  </div>
+                }
+              >
+                <ClipResults />
+              </Suspense>
             </motion.div>
           )}
         </AnimatePresence>

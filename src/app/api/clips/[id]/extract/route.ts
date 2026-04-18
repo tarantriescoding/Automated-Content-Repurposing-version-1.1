@@ -58,31 +58,32 @@ export async function POST(
         const clipPath = path.join(UPLOAD_DIR, clipFilename);
 
         try {
+          // Use stream copy for fast extraction (no re-encoding)
           await execFileAsync("ffmpeg", [
             "-ss", clipStart.toString(),
             "-i", videoPath,
             "-t", clipDuration.toString(),
-            "-c:v", "libx264",
-            "-c:a", "aac",
+            "-c", "copy",
+            "-avoid_negative_ts", "make_zero",
             "-y",
             clipPath,
-          ]);
+          ], { timeout: 30000 });
 
           if (fs.existsSync(clipPath)) {
             clipUrl = `/uploads/${clipFilename}`;
           }
         } catch {
-          // Fallback: accurate seek
+          // Fallback: accurate seek with stream copy
           try {
             await execFileAsync("ffmpeg", [
               "-i", videoPath,
               "-ss", clipStart.toString(),
               "-to", clipEnd.toString(),
-              "-c:v", "libx264",
-              "-c:a", "aac",
+              "-c", "copy",
+              "-avoid_negative_ts", "make_zero",
               "-y",
               clipPath,
-            ]);
+            ], { timeout: 30000 });
             if (fs.existsSync(clipPath)) {
               clipUrl = `/uploads/${clipFilename}`;
             }
@@ -151,10 +152,15 @@ function generateSrt(
   clipStartTime: number
 ): string {
   const lines: string[] = [];
+
+  // Detect if captions are already relative (start near 0) or absolute
+  const firstStart = captions.length > 0 ? captions[0].start : 0;
+  const isAlreadyRelative = firstStart < 5;
+
   for (let i = 0; i < captions.length; i++) {
     const c = captions[i];
-    const relStart = Math.max(0, c.start - clipStartTime);
-    const relEnd = Math.max(0, c.end - clipStartTime);
+    const relStart = isAlreadyRelative ? c.start : Math.max(0, c.start - clipStartTime);
+    const relEnd = isAlreadyRelative ? c.end : Math.max(0, c.end - clipStartTime);
     lines.push(String(i + 1));
     lines.push(`${formatSrtTime(relStart)} --> ${formatSrtTime(relEnd)}`);
     lines.push(c.text);

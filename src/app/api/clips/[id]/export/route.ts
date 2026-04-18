@@ -125,19 +125,12 @@ async function handleVideoExport(clip: {
   clipUrl: string;
   video: { id: string; filename: string; originalUrl: string };
 }) {
-  // If we already have an extracted clip file, serve it
+  // If we already have an extracted clip file, redirect to it
   if (clip.clipUrl) {
     const clipPath = path.join(process.cwd(), "public", clip.clipUrl);
     if (fs.existsSync(clipPath)) {
-      const stat = fs.statSync(clipPath);
-      const fileStream = fs.createReadStream(clipPath);
-      return new Response(fileStream as unknown as ReadableStream, {
-        headers: {
-          "Content-Type": "video/mp4",
-          "Content-Disposition": `inline; filename="${sanitizeFilename(clip.title || "clip")}.mp4"`,
-          "Content-Length": stat.size.toString(),
-        },
-      });
+      // Redirect to the static file - much more efficient than loading into memory
+      return NextResponse.redirect(new URL(clip.clipUrl, "http://localhost:3000"));
     }
   }
 
@@ -172,23 +165,20 @@ async function handleVideoExport(clip: {
   const tempClipPath = path.join(UPLOAD_DIR, tempClipFilename);
 
   try {
-    // Fast seek: -ss before -i, -t for duration
+    // Fast seek: -ss before -i, -t for duration, stream copy for speed
     await execFileAsync("ffmpeg", [
       "-ss", clipStart.toString(),
       "-i", videoPath,
       "-t", clipDuration.toString(),
-      "-c:v", "libx264",
-      "-c:a", "aac",
+      "-c", "copy",
+      "-avoid_negative_ts", "make_zero",
       "-y",
       tempClipPath,
-    ]);
+    ], { timeout: 30000 });
 
     if (!fs.existsSync(tempClipPath)) {
       throw new Error("ffmpeg did not produce output file");
     }
-
-    const stat = fs.statSync(tempClipPath);
-    const fileStream = fs.createReadStream(tempClipPath);
 
     // Save the clip URL for future requests
     const clipUrl = `/uploads/${tempClipFilename}`;
@@ -199,13 +189,8 @@ async function handleVideoExport(clip: {
 
     console.log(`[Export] On-the-fly extraction complete for clip ${clip.id}`);
 
-    return new Response(fileStream as unknown as ReadableStream, {
-      headers: {
-        "Content-Type": "video/mp4",
-        "Content-Disposition": `inline; filename="${sanitizeFilename(clip.title || "clip")}.mp4"`,
-        "Content-Length": stat.size.toString(),
-      },
-    });
+    // Redirect to the static file instead of loading into memory
+    return NextResponse.redirect(new URL(clipUrl, "http://localhost:3000"));
   } catch (ffmpegError) {
     console.error(`[Export] ffmpeg on-the-fly extraction failed for clip ${clip.id}:`, ffmpegError);
 
@@ -215,18 +200,15 @@ async function handleVideoExport(clip: {
         "-i", videoPath,
         "-ss", clipStart.toString(),
         "-to", clipEnd.toString(),
-        "-c:v", "libx264",
-        "-c:a", "aac",
+        "-c", "copy",
+        "-avoid_negative_ts", "make_zero",
         "-y",
         tempClipPath,
-      ]);
+      ], { timeout: 30000 });
 
       if (!fs.existsSync(tempClipPath)) {
         throw new Error("Fallback ffmpeg did not produce output file");
       }
-
-      const stat = fs.statSync(tempClipPath);
-      const fileStream = fs.createReadStream(tempClipPath);
 
       const clipUrl = `/uploads/${tempClipFilename}`;
       await db.clip.update({
@@ -236,13 +218,8 @@ async function handleVideoExport(clip: {
 
       console.log(`[Export] On-the-fly extraction (fallback) complete for clip ${clip.id}`);
 
-      return new Response(fileStream as unknown as ReadableStream, {
-        headers: {
-          "Content-Type": "video/mp4",
-          "Content-Disposition": `inline; filename="${sanitizeFilename(clip.title || "clip")}.mp4"`,
-          "Content-Length": stat.size.toString(),
-        },
-      });
+      // Redirect to the static file instead of loading into memory
+      return NextResponse.redirect(new URL(clipUrl, "http://localhost:3000"));
     } catch (fallbackError) {
       console.error(`[Export] Fallback extraction also failed for clip ${clip.id}:`, fallbackError);
 
@@ -300,13 +277,17 @@ function generateSrt(
 ): string {
   const lines: string[] = [];
 
+  // Detect if captions are already relative (start near 0) or absolute
+  const firstStart = captions.length > 0 ? captions[0].start : 0;
+  const isAlreadyRelative = firstStart < 5; // If first caption starts near 0, they're relative
+
   for (let i = 0; i < captions.length; i++) {
     const caption = captions[i];
-    const relativeStart = Math.max(0, caption.start - clipStartTime);
-    const relativeEnd = Math.max(0, caption.end - clipStartTime);
+    const relStart = isAlreadyRelative ? caption.start : Math.max(0, caption.start - clipStartTime);
+    const relEnd = isAlreadyRelative ? caption.end : Math.max(0, caption.end - clipStartTime);
 
     lines.push(String(i + 1));
-    lines.push(`${formatSrtTime(relativeStart)} --> ${formatSrtTime(relativeEnd)}`);
+    lines.push(`${formatSrtTime(relStart)} --> ${formatSrtTime(relEnd)}`);
     lines.push(caption.text);
     lines.push("");
   }

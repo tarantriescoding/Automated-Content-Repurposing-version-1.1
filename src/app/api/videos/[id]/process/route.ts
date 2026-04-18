@@ -264,16 +264,19 @@ function generateSrt(
 ): string {
   const lines: string[] = [];
 
+  // Detect if captions are already relative (start near 0) or absolute
+  const firstStart = captions.length > 0 ? captions[0].start : 0;
+  const isAlreadyRelative = firstStart < 5;
+
   for (let i = 0; i < captions.length; i++) {
     const caption = captions[i];
-    // Convert absolute times to clip-relative times
-    const relativeStart = Math.max(0, caption.start - clipStartTime);
-    const relativeEnd = Math.max(0, caption.end - clipStartTime);
+    const relativeStart = isAlreadyRelative ? caption.start : Math.max(0, caption.start - clipStartTime);
+    const relativeEnd = isAlreadyRelative ? caption.end : Math.max(0, caption.end - clipStartTime);
 
     lines.push(String(i + 1));
     lines.push(`${formatSrtTime(relativeStart)} --> ${formatSrtTime(relativeEnd)}`);
     lines.push(caption.text);
-    lines.push(""); // blank line separator
+    lines.push("");
   }
 
   return lines.join("\n");
@@ -747,16 +750,16 @@ Respond with ONLY valid JSON:
         console.log(`[Process] Extracting clip "${clipRecord.title}" (${clipStart.toFixed(1)}s - ${clipEnd.toFixed(1)}s, ${clipDuration.toFixed(1)}s)`);
 
         try {
-          // Use fast seek: -ss before -i for speed, -t for duration
+          // Use fast seek: -ss before -i for speed, stream copy for speed
           await execFileAsync("ffmpeg", [
             "-ss", clipStart.toString(),
             "-i", videoPath,
             "-t", clipDuration.toString(),
-            "-c:v", "libx264",
-            "-c:a", "aac",
+            "-c", "copy",
+            "-avoid_negative_ts", "make_zero",
             "-y",
             clipPath,
-          ]);
+          ], { timeout: 30000 });
 
           if (fs.existsSync(clipPath)) {
             const clipUrl = `/uploads/${clipFilename}`;
@@ -777,11 +780,11 @@ Respond with ONLY valid JSON:
               "-i", videoPath,
               "-ss", clipStart.toString(),
               "-to", clipEnd.toString(),
-              "-c:v", "libx264",
-              "-c:a", "aac",
+              "-c", "copy",
+              "-avoid_negative_ts", "make_zero",
               "-y",
               clipPath,
-            ]);
+            ], { timeout: 30000 });
 
             if (fs.existsSync(clipPath)) {
               const clipUrl = `/uploads/${clipFilename}`;
